@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Senado</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; background: #050d1a; color: #f1f5f9;
+  font-family: system-ui, sans-serif; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center;
+}
+
+header {
+  padding: 20px 0 6px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.title {
+  font-size: clamp(1.8rem, 4vw, 3.2rem);
+  font-weight: 800; letter-spacing: .05em;
+}
+.round-info {
+  font-size: clamp(.75rem, 1.4vw, 1.05rem);
+  color: #475569; margin-top: 5px;
+}
+
+.hemiciclo-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  min-height: 0;
+}
+
+#hemiciclo {
+  width: 100%;
+  max-width: 1100px;
+  height: auto;
+  display: block;
+}
+
+/* ── Senadores ── */
+.senator-circle { transition: fill .5s ease; }
+
+@keyframes senatorFlip {
+  0%   { transform-box: fill-box; transform-origin: center; transform: scale(1); }
+  45%  { transform-box: fill-box; transform-origin: center; transform: scale(2); }
+  100% { transform-box: fill-box; transform-origin: center; transform: scale(1); }
+}
+.senator-circle.flipping {
+  transition: none;
+  animation: senatorFlip .38s cubic-bezier(.36,.07,.19,.97);
+}
+
+/* ── Leyenda ── */
+footer {
+  flex-shrink: 0;
+  padding: 10px 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 9px;
+  font-size: clamp(.85rem, 1.6vw, 1.15rem);
+}
+.legend-dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.leg-azul     { background: #3b82f6; }
+.leg-amarillo { background: #eab308; }
+.leg-rojo     { background: #ef4444; }
+.leg-label { color: #94a3b8; }
+.leg-count  {
+  font-weight: 800; font-size: 1.25em; min-width: 2ch; text-align: right;
+  transition: color .3s;
+}
+
+.status-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 7px;
+  padding-bottom: 8px;
+  font-size: .72rem; color: #334155;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #ef4444; }
+.dot.on { background: #22c55e; }
+
+/* ── Overlay de votación ── */
+.vote-overlay {
+  position: fixed; inset: 0;
+  background: rgba(5, 13, 26, 0.93);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 40px;
+  z-index: 50;
+  opacity: 0; pointer-events: none;
+  transition: opacity .5s ease;
+}
+.vote-overlay.show { opacity: 1; pointer-events: auto; }
+
+.overlay-title {
+  font-size: clamp(2.2rem, 7vw, 5.5rem);
+  font-weight: 900; letter-spacing: .1em;
+  text-align: center; color: #f1f5f9;
+}
+.overlay-title.pulsing {
+  animation: pulse .8s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+.result-counts {
+  display: flex; align-items: center; gap: 40px;
+  flex-wrap: wrap; justify-content: center;
+}
+.result-item {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  animation: countPop .5s cubic-bezier(.34,1.56,.64,1) both;
+}
+.result-item:nth-child(1) { animation-delay: .0s; }
+.result-item:nth-child(3) { animation-delay: .12s; }
+.result-item:nth-child(5) { animation-delay: .24s; }
+
+.result-number {
+  font-size: clamp(4rem, 12vw, 8rem);
+  font-weight: 900; line-height: 1;
+}
+.result-label {
+  font-size: clamp(.85rem, 1.8vw, 1.3rem);
+  color: #64748b; text-transform: uppercase; letter-spacing: .12em;
+}
+.result-divider { font-size: 3rem; color: #1e293b; align-self: center; }
+
+.overlay-hint {
+  font-size: .85rem; color: #334155; cursor: pointer;
+  border: 1px solid #1e293b; padding: 8px 20px; border-radius: 20px;
+}
+.overlay-hint:hover { color: #64748b; border-color: #334155; }
+
+@keyframes countPop {
+  from { transform: scale(0.4) translateY(20px); opacity: 0; }
+  to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">🏛️ El Senado</div>
+  <div class="round-info" id="roundInfo">Senado de la Nación Argentina</div>
+</header>
+
+<div class="hemiciclo-wrap">
+  <svg id="hemiciclo" viewBox="0 0 800 310" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<footer>
+  <div class="legend-item">
+    <div class="legend-dot leg-azul"></div>
+    <span class="leg-label">A favor</span>
+    <span class="leg-count" id="cntAzul">24</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot leg-amarillo"></div>
+    <span class="leg-label">Indeciso</span>
+    <span class="leg-count" id="cntAmarillo">24</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot leg-rojo"></div>
+    <span class="leg-label">En contra</span>
+    <span class="leg-count" id="cntRojo">24</span>
+  </div>
+</footer>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span id="statusText">Desconectado</span>
+</div>
+
+<!-- Overlay de votación -->
+<div class="vote-overlay" id="voteOverlay" onclick="handleOverlayClick()">
+  <div class="overlay-title pulsing" id="overlayTitle"></div>
+  <div class="result-counts" id="resultCounts" style="display:none">
+    <div class="result-item">
+      <div class="result-number" style="color:#3b82f6" id="resAzul">0</div>
+      <div class="result-label">A Favor</div>
+    </div>
+    <div class="result-divider">·</div>
+    <div class="result-item">
+      <div class="result-number" style="color:#eab308" id="resAmarillo">0</div>
+      <div class="result-label">Indecisos</div>
+    </div>
+    <div class="result-divider">·</div>
+    <div class="result-item">
+      <div class="result-number" style="color:#ef4444" id="resRojo">0</div>
+      <div class="result-label">En Contra</div>
+    </div>
+  </div>
+  <div class="overlay-hint" id="overlayHint" style="display:none">Tocá para cerrar</div>
+</div>
+
+<script>
+// ── Layout del hemiciclo ─────────────────────────────────────────
+const CX = 400, CY = 295;
+const ROWS = [
+  { r: 100, count: 10 },
+  { r: 158, count: 15 },
+  { r: 216, count: 21 },
+  { r: 274, count: 26 },
+];
+const R_SENATOR = 13;
+const COLORS = { azul: '#3b82f6', amarillo: '#eab308', rojo: '#ef4444' };
+
+function buildPositions() {
+  const pos = [];
+  let id = 0;
+  for (const row of ROWS) {
+    for (let i = 0; i < row.count; i++) {
+      const pct   = row.count === 1 ? 0.5 : i / (row.count - 1);
+      const angle = Math.PI * (1 - pct);
+      pos.push({ id: id++, x: CX + row.r * Math.cos(angle), y: CY - row.r * Math.sin(angle) });
+    }
+  }
+  return pos;
+}
+
+const POSITIONS = buildPositions();
+
+const _sortedByX = [...POSITIONS].sort((a, b) => a.x - b.x);
+let senators = _sortedByX.map((p, i) => ({
+  id: p.id,
+  stance: i < 24 ? 'azul' : i < 48 ? 'amarillo' : 'rojo',
+}));
+
+// ── SVG ─────────────────────────────────────────────────────────
+function buildSVG() {
+  const svg = document.getElementById('hemiciclo');
+
+  for (const row of ROWS) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${CX - row.r} ${CY} A ${row.r} ${row.r} 0 0 1 ${CX + row.r} ${CY}`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', '#0d1f38');
+    path.setAttribute('stroke-width', '1');
+    svg.appendChild(path);
+  }
+
+  const base = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  base.setAttribute('x1', CX - ROWS[3].r - 14); base.setAttribute('x2', CX + ROWS[3].r + 14);
+  base.setAttribute('y1', CY); base.setAttribute('y2', CY);
+  base.setAttribute('stroke', '#0d1f38'); base.setAttribute('stroke-width', '1.5');
+  svg.appendChild(base);
+
+  for (const { id, x, y } of POSITIONS) {
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', x.toFixed(1)); c.setAttribute('cy', y.toFixed(1));
+    c.setAttribute('r', R_SENATOR);
+    c.setAttribute('fill', COLORS[senators.find(s => s.id === id).stance]);
+    c.setAttribute('stroke', '#050d1a'); c.setAttribute('stroke-width', '2');
+    c.setAttribute('class', 'senator-circle'); c.setAttribute('data-sid', id);
+    svg.appendChild(c);
+  }
+}
+
+function updateColors() {
+  const svg = document.getElementById('hemiciclo');
+  for (const s of senators) {
+    const el = svg.querySelector(`[data-sid="${s.id}"]`);
+    if (el) el.setAttribute('fill', COLORS[s.stance] || COLORS.amarillo);
+  }
+}
+
+function updateCounts() {
+  const c = { azul: 0, amarillo: 0, rojo: 0 };
+  senators.forEach(s => { if (c[s.stance] !== undefined) c[s.stance]++; });
+  document.getElementById('cntAzul').textContent     = c.azul;
+  document.getElementById('cntAmarillo').textContent = c.amarillo;
+  document.getElementById('cntRojo').textContent     = c.rojo;
+}
+
+function applyState(data) {
+  if (data.senators && data.senators.length) {
+    senators = data.senators;
+    updateColors();
+    updateCounts();
+  }
+  if (data.round) {
+    document.getElementById('roundInfo').textContent = `Ronda ${data.round}`;
+  }
+}
+
+buildSVG();
+updateCounts();
+
+// ── Animación de votación ────────────────────────────────────────
+const wait = ms => new Promise(r => setTimeout(r, ms));
+let animating = false;
+let overlayCanClose = false;
+
+function showOverlay(text, pulse = true) {
+  const title = document.getElementById('overlayTitle');
+  title.textContent = text;
+  title.classList.toggle('pulsing', pulse);
+  document.getElementById('resultCounts').style.display = 'none';
+  document.getElementById('overlayHint').style.display  = 'none';
+  document.getElementById('voteOverlay').classList.add('show');
+  overlayCanClose = false;
+}
+
+function hideOverlay() {
+  document.getElementById('voteOverlay').classList.remove('show');
+  overlayCanClose = false;
+  animating = false;
+}
+
+function handleOverlayClick() {
+  if (overlayCanClose) hideOverlay();
+}
+
+function flipSenator(svg, { id, to }) {
+  const el = svg.querySelector(`[data-sid="${id}"]`);
+  if (!el) return;
+  el.classList.add('flipping');
+  setTimeout(() => el.setAttribute('fill', COLORS[to]), 190);
+  el.addEventListener('animationend', () => el.classList.remove('flipping'), { once: true });
+  const s = senators.find(s => s.id === id);
+  if (s) s.stance = to;
+}
+
+async function applyWave(svg, changes, stagger = 28) {
+  for (let i = 0; i < changes.length; i++) {
+    setTimeout(() => flipSenator(svg, changes[i]), i * stagger);
+  }
+  await wait(changes.length * stagger + 450);
+  updateCounts();
+}
+
+async function animateVote({ changes, final }) {
+  if (animating) return;
+  animating = true;
+
+  const svg = document.getElementById('hemiciclo');
+
+  if (!changes || !changes.length) {
+    senators = final;
+    updateColors(); updateCounts();
+    animating = false;
+    return;
+  }
+
+  // Fase 1: overlay "CALCULANDO"
+  showOverlay('⚖️ CALCULANDO...', true);
+  await wait(1400);
+  hideOverlay();
+  await wait(500);
+
+  // Fase 2: animación en 3 olas (mezcla aleatoria)
+  const shuffled = [...changes].sort(() => Math.random() - 0.5);
+  const third    = Math.ceil(shuffled.length / 3);
+  const waves    = [shuffled.slice(0, third), shuffled.slice(third, third * 2), shuffled.slice(third * 2)];
+
+  for (const wave of waves) {
+    await applyWave(svg, wave);
+    await wait(1000);
+  }
+
+  // Fase 3: sincronizar estado final (por si hay diferencia marginal)
+  senators = final;
+  updateColors();
+  updateCounts();
+
+  await wait(600);
+
+  // Fase 4: overlay resultado final
+  const counts = { azul: 0, amarillo: 0, rojo: 0 };
+  senators.forEach(s => { if (counts[s.stance] !== undefined) counts[s.stance]++; });
+
+  const title = document.getElementById('overlayTitle');
+  title.textContent = '⚖️ RESULTADO';
+  title.classList.remove('pulsing');
+  document.getElementById('resAzul').textContent     = counts.azul;
+  document.getElementById('resAmarillo').textContent = counts.amarillo;
+  document.getElementById('resRojo').textContent     = counts.rojo;
+  document.getElementById('resultCounts').style.display = 'flex';
+  document.getElementById('voteOverlay').classList.add('show');
+
+  await wait(800);
+  document.getElementById('overlayHint').style.display = 'block';
+  overlayCanClose = true;
+  animating = false;
+}
+
+// ── WebSocket ────────────────────────────────────────────────────
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+let ws;
+
+function connect() {
+  ws = new WebSocket(`${wsProto}//${location.host}`);
+
+  ws.onopen = () => {
+    setStatus(true);
+    ws.send(JSON.stringify({ type: 'identify', data: { clientType: 'senado' } }));
+  };
+
+  ws.onclose = () => { setStatus(false); setTimeout(connect, 2000); };
+
+  ws.onmessage = ({ data: raw }) => {
+    const { type, data } = JSON.parse(raw);
+    switch (type) {
+      case 'state_sync':
+      case 'state_update':
+        if (!animating) applyState(data);
+        break;
+      case 'vote_animation':
+        animateVote(data);
+        break;
+    }
+  };
+}
+
+function setStatus(ok) {
+  document.getElementById('dot').classList.toggle('on', ok);
+  document.getElementById('statusText').textContent = ok ? 'Conectado' : 'Desconectado';
+}
+
+connect();
+</script>
+</body>
+</html>

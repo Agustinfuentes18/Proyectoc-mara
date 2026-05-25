@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Senado — Control</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --rojo:    #dc2626;
+  --azul:    #2563eb;
+  --bg:      #0f172a;
+  --surface: #1e293b;
+  --border:  #334155;
+  --text:    #f1f5f9;
+  --muted:   #94a3b8;
+  --green:   #22c55e;
+}
+html, body {
+  height: 100%; background: var(--bg); color: var(--text);
+  font-family: system-ui, sans-serif; overflow: hidden;
+}
+body {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+}
+
+/* ── Header ── */
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+header h1 { font-size: 1rem; font-weight: 700; }
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #ef4444; flex-shrink: 0;
+  transition: background .3s;
+}
+.dot.on { background: var(--green); }
+.chip {
+  padding: 3px 10px; border-radius: 20px;
+  font-size: .78rem; font-weight: 700;
+}
+.chip.round-chip { background: var(--border); color: var(--muted); }
+.chip.rojo { background: rgba(220,38,38,.2); color: #fca5a5; border: 1px solid var(--rojo); }
+.chip.azul { background: rgba(37,99,235,.2);  color: #93c5fd;  border: 1px solid var(--azul); }
+.spacer { flex: 1; }
+#statusText { font-size: .75rem; color: var(--muted); }
+
+/* ── Layout principal ── */
+main {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  overflow: hidden;
+}
+
+/* ── Panel izquierdo ── */
+.left {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+.section {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sec-title {
+  font-size: .7rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.toggle-btn {
+  cursor: pointer; font-size: .7rem; color: var(--muted);
+  user-select: none; background: none; border: none;
+  color: var(--muted);
+}
+.collapsed { display: none !important; }
+
+textarea, input[type=text] {
+  width: 100%; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-family: inherit;
+  font-size: .88rem; padding: 9px 12px; resize: none;
+  line-height: 1.55;
+}
+textarea:focus, input:focus {
+  outline: none; border-color: var(--azul);
+}
+
+btn, button {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; padding: 8px 14px; border-radius: 8px; border: none;
+  cursor: pointer; font-size: .82rem; font-weight: 600;
+  transition: filter .15s; font-family: inherit;
+}
+button:hover  { filter: brightness(1.15); }
+button:active { filter: brightness(.9); }
+.btn-primary { background: var(--azul); color: #fff; }
+.btn-rojo    { background: var(--rojo); color: #fff; }
+.btn-azul    { background: var(--azul); color: #fff; }
+.btn-ghost   { background: var(--border); color: var(--text); }
+.btn-success { background: #16a34a; color: #fff; }
+.btn-purple  { background: #7c3aed; color: #fff; }
+.btn-full    { width: 100%; padding: 11px; font-size: .9rem; }
+.row { display: flex; gap: 8px; margin-top: 8px; }
+.row .f1 { flex: 1; }
+
+/* Sección argumento — crece */
+.arg-section {
+  flex: 1; display: flex; flex-direction: column;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  overflow: hidden; min-height: 0;
+}
+.arg-section textarea { flex: 1; resize: none; min-height: 60px; }
+
+.actions {
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+
+/* ── Panel derecho: historial ── */
+.right {
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.hist-header {
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  font-size: .7rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+.entry-count {
+  background: var(--border); color: var(--muted);
+  border-radius: 20px; padding: 2px 8px; font-size: .7rem;
+}
+.hist-body {
+  flex: 1; overflow-y: auto; padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.hist-empty {
+  color: var(--muted); font-style: italic; font-size: .9rem;
+  text-align: center; margin-top: 48px;
+}
+
+/* Entradas del debate */
+.entry {
+  background: var(--surface); border-radius: 10px;
+  padding: 12px 16px; border-left: 4px solid var(--border);
+  animation: slideIn .2s ease;
+}
+.entry.rojo { border-left-color: var(--rojo); }
+.entry.azul { border-left-color: var(--azul); }
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.entry-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.entry-team { font-weight: 700; font-size: .88rem; }
+.entry-team.rojo { color: #fca5a5; }
+.entry-team.azul { color: #93c5fd; }
+.entry-meta { font-size: .72rem; color: var(--muted); margin-left: auto; }
+.overtime-tag {
+  font-size: .68rem; background: rgba(234,179,8,.15);
+  color: #fde68a; border: 1px solid #ca8a04;
+  border-radius: 4px; padding: 1px 6px;
+}
+.entry-text { font-size: .88rem; line-height: 1.6; color: #cbd5e1; }
+
+/* Notificaciones */
+.notif {
+  position: fixed; top: 64px; right: 16px;
+  background: #16a34a; color: #fff;
+  padding: 9px 16px; border-radius: 8px;
+  font-size: .82rem; font-weight: 600;
+  opacity: 0; transform: translateY(-6px);
+  transition: all .25s; pointer-events: none; z-index: 200;
+}
+.notif.show { opacity: 1; transform: translateY(0); }
+.notif.error { background: var(--rojo); }
+
+.test-flash {
+  position: fixed; bottom: 16px; right: 16px;
+  background: #7c3aed; color: #fff;
+  padding: 9px 16px; border-radius: 8px;
+  font-size: .82rem; font-weight: 600;
+  opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 200;
+}
+.test-flash.show { opacity: 1; }
+
+@keyframes blink-in { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── Panel de scores Gemini ── */
+.scores-panel {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.scores-panel.visible { display: flex; }
+.scores-title {
+  font-size: .68rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+  margin-bottom: 2px;
+}
+.scores-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.score-col { display: flex; flex-direction: column; gap: 6px; }
+.score-col-title {
+  font-size: .72rem; font-weight: 700;
+  margin-bottom: 2px;
+}
+.score-col-title.azul { color: #93c5fd; }
+.score-col-title.rojo { color: #fca5a5; }
+.score-row { display: flex; flex-direction: column; gap: 2px; }
+.score-label { font-size: .65rem; color: var(--muted); }
+.score-bar-wrap {
+  background: var(--bg); border-radius: 4px;
+  height: 7px; overflow: hidden;
+}
+.score-bar {
+  height: 100%; border-radius: 4px;
+  transition: width .6s cubic-bezier(.4,0,.2,1);
+}
+.score-bar.azul { background: var(--azul); }
+.score-bar.rojo { background: var(--rojo); }
+.score-num { font-size: .68rem; color: var(--muted); text-align: right; }
+.overtime-note {
+  font-size: .68rem; color: #fde68a;
+  background: rgba(234,179,8,.1); border: 1px solid #ca8a04;
+  border-radius: 4px; padding: 4px 8px;
+}
+
+/* scrollbar sutil */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="dot" id="dot"></div>
+  <h1>🏛️ El Senado</h1>
+  <span class="chip round-chip" id="roundChip">Ronda 1</span>
+  <span class="chip rojo" id="teamChip">🔴 Equipo Rojo</span>
+  <span class="spacer"></span>
+  <span id="statusText">Desconectado</span>
+</header>
+
+<main>
+
+  <!-- ── Panel izquierdo ── -->
+  <div class="left">
+
+    <!-- Sección paper -->
+    <div class="section">
+      <div class="sec-title">
+        Contexto del debate (paper)
+        <button class="toggle-btn" id="paperToggle" onclick="togglePaper()">▲ colapsar</button>
+      </div>
+      <div id="paperBody">
+        <textarea id="paperInput" rows="5"
+          placeholder="Pegá acá el blog o paper que servirá de contexto para los senadores de Gemini..."></textarea>
+        <div class="row">
+          <button class="btn-primary f1" onclick="savePaper()">Guardar contexto</button>
+          <span id="paperAck" style="font-size:.72rem;color:var(--muted);align-self:center;white-space:nowrap"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección argumento actual -->
+    <div class="arg-section">
+      <div class="sec-title">
+        Argumento actual
+        <span id="liveIndicator" style="display:none;font-size:.7rem;background:var(--rojo);color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;animation:blink-in .7s ease-in-out infinite">● EN VIVO</span>
+        <span id="currentTeamLabel" style="font-size:.78rem;color:var(--muted)">Turno: 🔴 Rojo</span>
+      </div>
+      <textarea id="argInput"
+        placeholder="Escribir o pegar argumento para testear (o el texto llegará automáticamente desde /tablet en Fase 3)..."></textarea>
+
+      <!-- Agregar explícitamente como un equipo (útil para testeo) -->
+      <div class="row" style="margin-top:10px">
+        <button class="btn-rojo f1" onclick="addAs('rojo')">🔴 Agregar como Rojo</button>
+        <button class="btn-azul f1" onclick="addAs('azul')">🔵 Agregar como Azul</button>
+      </div>
+
+      <!-- Listo: usa el equipo del turno actual -->
+      <div class="row">
+        <button class="btn-success btn-full" onclick="listo()">✓ Listo — cerrar intervención actual</button>
+      </div>
+    </div>
+
+    <!-- Botones principales -->
+    <div class="actions">
+      <button class="btn-purple btn-full" id="voteBtn" onclick="calcularVotos()">
+        🗳️ Calcular y votar
+      </button>
+      <button class="btn-ghost btn-full" onclick="testConexion()">
+        📡 Test de conexión
+      </button>
+    </div>
+
+    <!-- Panel de scores Gemini (aparece tras calcular) -->
+    <div class="scores-panel" id="scoresPanel">
+      <div class="scores-title">Evaluación de Gemini</div>
+      <div id="overtimeNote"></div>
+      <div class="scores-grid">
+        <div class="score-col" id="scoresAzul">
+          <div class="score-col-title azul">🔵 Azul</div>
+        </div>
+        <div class="score-col" id="scoresRojo">
+          <div class="score-col-title rojo">🔴 Rojo</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.left -->
+
+  <!-- ── Panel derecho: historial ── -->
+  <div class="right">
+    <div class="hist-header">
+      Historial del debate
+      <span class="entry-count" id="entryCount">0 argumentos</span>
+    </div>
+    <div class="hist-body" id="histBody">
+      <div class="hist-empty" id="histEmpty">No hay argumentos registrados todavía.</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Notificaciones flotantes -->
+<div class="notif" id="notif"></div>
+<div class="test-flash" id="testFlash">📡 Test recibido en todos los clientes</div>
+
+<script>
+// ── WebSocket ────────────────────────────────────────────────────────────────
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+let ws;
+
+function connect() {
+  ws = new WebSocket(`${wsProto}//${location.host}`);
+
+  ws.onopen = () => {
+    setStatus(true);
+    ws.send(JSON.stringify({ type: 'identify', data: { clientType: 'control' } }));
+  };
+
+  ws.onclose = () => {
+    setStatus(false);
+    setTimeout(connect, 2000);
+  };
+
+  ws.onmessage = ({ data: raw }) => {
+    const { type, data } = JSON.parse(raw);
+    switch (type) {
+      case 'state_sync':
+      case 'state_update':
+        applyState(data);
+        break;
+      case 'paper_ack':
+        document.getElementById('paperAck').textContent =
+          `✓ ${data.chars.toLocaleString()} chars`;
+        notify('Contexto guardado');
+        break;
+      case 'test_received':
+        flashTest();
+        break;
+      case 'vote_loading':
+        setVoteLoading(true);
+        break;
+
+      case 'vote_result':
+        setVoteLoading(false);
+        showScores(data.scores);
+        notify('¡Votación calculada!');
+        break;
+
+      case 'vote_error':
+        setVoteLoading(false);
+        notify(data.msg, true);
+        break;
+      case 'transcript_update': {
+        const inp = document.getElementById('argInput');
+        inp.value = data.text;
+        inp.scrollTop = inp.scrollHeight;
+        break;
+      }
+      case 'recording_status':
+        document.getElementById('liveIndicator').style.display =
+          data.active ? 'inline' : 'none';
+        break;
+    }
+  };
+}
+
+function setStatus(ok) {
+  document.getElementById('dot').classList.toggle('on', ok);
+  document.getElementById('statusText').textContent =
+    ok ? 'Conectado' : 'Desconectado — reconectando…';
+}
+
+// ── Render estado ────────────────────────────────────────────────────────────
+function applyState(s) {
+  document.getElementById('roundChip').textContent = `Ronda ${s.round}`;
+
+  const chip = document.getElementById('teamChip');
+  const label = document.getElementById('currentTeamLabel');
+  if (s.team === 'rojo') {
+    chip.textContent = '🔴 Equipo Rojo';
+    chip.className = 'chip rojo';
+    label.textContent = 'Turno: 🔴 Rojo';
+  } else {
+    chip.textContent = '🔵 Equipo Azul';
+    chip.className = 'chip azul';
+    label.textContent = 'Turno: 🔵 Azul';
+  }
+
+  const body  = document.getElementById('histBody');
+  const empty = document.getElementById('histEmpty');
+  const count = document.getElementById('entryCount');
+
+  count.textContent = `${s.entries.length} argumento${s.entries.length !== 1 ? 's' : ''}`;
+
+  // Limpiar entradas previas
+  body.querySelectorAll('.entry').forEach(el => el.remove());
+
+  if (!s.entries.length) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  s.entries.forEach(e => {
+    const div = document.createElement('div');
+    div.className = `entry ${e.team}`;
+    const emoji = e.team === 'rojo' ? '🔴' : '🔵';
+    const name  = e.team === 'rojo' ? 'Equipo Rojo' : 'Equipo Azul';
+    const ot    = e.overtime
+      ? '<span class="overtime-tag">⏱️ Tiempo excedido</span>' : '';
+    div.innerHTML = `
+      <div class="entry-head">
+        <span class="entry-team ${e.team}">${emoji} ${name}</span>
+        ${ot}
+        <span class="entry-meta">Ronda ${e.round}</span>
+      </div>
+      <div class="entry-text">&ldquo;${esc(e.text)}&rdquo;</div>
+    `;
+    body.appendChild(div);
+  });
+
+  body.scrollTop = body.scrollHeight;
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+           .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Acciones ─────────────────────────────────────────────────────────────────
+function savePaper() {
+  const text = document.getElementById('paperInput').value;
+  ws.send(JSON.stringify({ type: 'set_paper', data: { text } }));
+}
+
+function addAs(team) {
+  const input = document.getElementById('argInput');
+  const text  = input.value.trim();
+  if (!text) { notify('El campo está vacío', true); return; }
+  ws.send(JSON.stringify({ type: 'add_argument', data: { text, team } }));
+  input.value = '';
+}
+
+function listo() {
+  const input = document.getElementById('argInput');
+  const text  = input.value.trim();
+  if (!text) { notify('No hay texto para cerrar', true); return; }
+  // Usa el equipo del turno actual
+  const team = document.getElementById('teamChip').className.includes('rojo') ? 'rojo' : 'azul';
+  ws.send(JSON.stringify({ type: 'add_argument', data: { text, team } }));
+  input.value = '';
+}
+
+function calcularVotos() {
+  ws.send(JSON.stringify({ type: 'calculate_votes', data: {} }));
+}
+
+function setVoteLoading(on) {
+  const btn = document.getElementById('voteBtn');
+  btn.disabled = on;
+  btn.textContent = on ? '⏳ Consultando a Gemini…' : '🗳️ Calcular y votar';
+}
+
+function showScores(scores) {
+  const panel = document.getElementById('scoresPanel');
+  panel.classList.add('visible');
+
+  const LABELS = { score_paper: 'Paper', score_retorica: 'Retórica', score_contra: 'Contra' };
+  ['azul', 'rojo'].forEach(team => {
+    const col = document.getElementById(`scores${team.charAt(0).toUpperCase() + team.slice(1)}`);
+    // Conservar solo el título
+    col.querySelectorAll('.score-row').forEach(el => el.remove());
+    for (const [key, label] of Object.entries(LABELS)) {
+      const val = (scores[team][key] ?? 0);
+      const pct = Math.round(val * 100);
+      const row = document.createElement('div');
+      row.className = 'score-row';
+      row.innerHTML = `
+        <div class="score-label">${label}</div>
+        <div class="score-bar-wrap">
+          <div class="score-bar ${team}" style="width:${pct}%"></div>
+        </div>
+        <div class="score-num">${pct}%</div>
+      `;
+      col.appendChild(row);
+    }
+  });
+}
+
+function testConexion() {
+  ws.send(JSON.stringify({ type: 'test_event', data: {} }));
+  notify('Test enviado');
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+let notifTimer;
+function notify(msg, isError = false) {
+  const el = document.getElementById('notif');
+  el.textContent = msg;
+  el.classList.toggle('error', isError);
+  el.classList.add('show');
+  clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+let testTimer;
+function flashTest() {
+  const el = document.getElementById('testFlash');
+  el.classList.add('show');
+  clearTimeout(testTimer);
+  testTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+let paperCollapsed = false;
+function togglePaper() {
+  paperCollapsed = !paperCollapsed;
+  document.getElementById('paperBody').classList.toggle('collapsed', paperCollapsed);
+  document.getElementById('paperToggle').textContent =
+    paperCollapsed ? '▼ expandir' : '▲ colapsar';
+}
+
+connect();
+</script>
+</body>
+</html>

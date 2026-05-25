@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>El Senado — Tablet</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --rojo: #dc2626; --azul: #2563eb; }
+html, body {
+  height: 100%; background: #0f172a; color: #f1f5f9;
+  font-family: system-ui, sans-serif; overflow: hidden;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+  position: relative;
+}
+
+/* ── Screens ── */
+.screen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 72px 24px 28px;
+  text-align: center;
+  transition: opacity .3s;
+}
+.screen.off { opacity: 0; pointer-events: none; }
+
+/* ── Status bar (siempre visible) ── */
+.status-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  padding: 10px 16px;
+  background: rgba(15,23,42,.85); backdrop-filter: blur(8px);
+  display: flex; align-items: center; gap: 8px;
+  font-size: .82rem; color: #475569;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; transition: background .3s; }
+.dot.on { background: #22c55e; }
+
+/* ── HTTPS warning ── */
+.https-warn {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+  background: #92400e; color: #fef3c7;
+  padding: 12px 16px; font-size: .82rem;
+  text-align: center; line-height: 1.5;
+}
+.https-warn.off { display: none; }
+
+/* ══════════════════════════════════════════════
+   IDLE
+══════════════════════════════════════════════ */
+.team-card {
+  width: 100%; max-width: 420px;
+  background: #1e293b; border-radius: 24px;
+  padding: 40px 28px; margin-bottom: 28px;
+  border: 3px solid #334155;
+  transition: border-color .4s, background .4s;
+}
+.team-card.rojo { border-color: var(--rojo); background: rgba(220,38,38,.08); }
+.team-card.azul { border-color: var(--azul); background: rgba(37,99,235,.08); }
+.team-emoji { font-size: 3.5rem; }
+.team-name  { font-size: 2.2rem; font-weight: 800; margin-top: 8px; }
+.team-name.rojo { color: #fca5a5; }
+.team-name.azul { color: #93c5fd; }
+.round-lbl { font-size: 1rem; color: #64748b; margin-top: 8px; }
+
+.mic-btn {
+  width: 100%; max-width: 420px;
+  padding: 22px; border-radius: 20px; border: none;
+  background: #16a34a; color: #fff;
+  font-size: 1.4rem; font-weight: 800; cursor: pointer;
+  transition: filter .15s, transform .1s;
+}
+.mic-btn:active { filter: brightness(.82); transform: scale(.97); }
+
+/* ══════════════════════════════════════════════
+   DRAWING (sorteo)
+══════════════════════════════════════════════ */
+.draw-title { font-size: 1.4rem; color: #64748b; margin-bottom: 28px; }
+.spin-row   { display: flex; gap: 14px; margin-bottom: 36px; }
+.spin-dot   {
+  width: 22px; height: 22px; border-radius: 50%;
+  animation: pulse .55s ease-in-out infinite alternate;
+}
+.spin-dot.r { background: var(--rojo); animation-delay: 0s; }
+.spin-dot.a { background: var(--azul); animation-delay: .28s; }
+@keyframes pulse {
+  from { transform: scale(.65); opacity: .35; }
+  to   { transform: scale(1.35); opacity: 1; }
+}
+.draw-result {
+  font-size: 2rem; font-weight: 800;
+  animation: pop-in .4s cubic-bezier(.22,.61,.36,1.3) both;
+}
+.draw-result.rojo { color: #fca5a5; }
+.draw-result.azul { color: #93c5fd; }
+.draw-result.off { display: none; }
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ══════════════════════════════════════════════
+   RECORDING
+══════════════════════════════════════════════ */
+#sRecording {
+  justify-content: flex-start;
+  gap: 0;
+}
+.rec-header {
+  width: 100%; max-width: 520px;
+  display: flex; align-items: center;
+  justify-content: space-between;
+  padding: 12px 0; flex-shrink: 0;
+}
+.rec-team { font-size: 1.3rem; font-weight: 700; }
+.rec-team.rojo { color: #fca5a5; }
+.rec-team.azul { color: #93c5fd; }
+.timer {
+  font-size: 2.2rem; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #22c55e; transition: color .4s;
+}
+.timer.warn     { color: #f59e0b; }
+.timer.overtime { color: var(--rojo); animation: blink .65s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.overtime-bar {
+  width: 100%; max-width: 520px;
+  background: var(--rojo); color: #fff;
+  padding: 10px; border-radius: 12px;
+  font-size: .95rem; font-weight: 700;
+  text-align: center; margin-bottom: 10px;
+  animation: blink .65s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.overtime-bar.off { display: none; }
+
+.transcript-wrap {
+  flex: 1; width: 100%; max-width: 520px;
+  background: #1e293b; border-radius: 16px;
+  padding: 16px; overflow-y: auto;
+  font-size: 1.1rem; line-height: 1.75;
+  color: #cbd5e1; text-align: left;
+  margin-bottom: 14px; min-height: 0;
+}
+.transcript-wrap .interim { color: #475569; }
+
+.fin-btn {
+  width: 100%; max-width: 520px;
+  padding: 20px; border-radius: 20px; border: none;
+  background: #16a34a; color: #fff;
+  font-size: 1.2rem; font-weight: 800;
+  cursor: pointer; flex-shrink: 0;
+  transition: filter .15s, transform .1s;
+}
+.fin-btn.overtime-mode { background: var(--rojo); }
+.fin-btn:active { filter: brightness(.82); transform: scale(.97); }
+
+/* ══════════════════════════════════════════════
+   DONE
+══════════════════════════════════════════════ */
+.done-circle {
+  width: 100px; height: 100px; border-radius: 50%;
+  background: #16a34a; font-size: 3rem;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 20px;
+  animation: pop-in .4s cubic-bezier(.22,.61,.36,1.3);
+}
+.done-lbl { font-size: 2rem; font-weight: 800; color: #4ade80; }
+</style>
+</head>
+<body>
+
+<!-- Status bar -->
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span id="statusText">Desconectado</span>
+</div>
+
+<!-- HTTPS warning -->
+<div class="https-warn off" id="httpsWarn">
+  ⚠️ El micrófono requiere HTTPS. Accedé usando una URL segura, o desde el mismo
+  dispositivo como <strong>localhost</strong>. (Tip: usá ngrok para HTTPS en la red local.)
+</div>
+
+<!-- ══ IDLE ══ -->
+<div id="sIdle" class="screen">
+  <div class="team-card rojo" id="idleCard">
+    <div class="team-emoji" id="idleEmoji">🔴</div>
+    <div class="team-name rojo" id="idleName">Equipo Rojo</div>
+    <div class="round-lbl" id="idleRound">Ronda 1</div>
+  </div>
+  <button class="mic-btn" onclick="startRecording()">🎤 Activar micrófono</button>
+</div>
+
+<!-- ══ DRAWING ══ -->
+<div id="sDrawing" class="screen off">
+  <div class="draw-title">Sorteando equipo…</div>
+  <div class="spin-row">
+    <div class="spin-dot r"></div><div class="spin-dot a"></div>
+    <div class="spin-dot r"></div><div class="spin-dot a"></div>
+    <div class="spin-dot r"></div>
+  </div>
+  <div class="draw-result off" id="drawResult"></div>
+</div>
+
+<!-- ══ RECORDING ══ -->
+<div id="sRecording" class="screen off">
+  <div class="rec-header">
+    <span class="rec-team rojo" id="recTeam">🔴 Equipo Rojo</span>
+    <span class="timer" id="timerDisplay">2:00</span>
+  </div>
+  <div class="overtime-bar off" id="overtimeBar">⚠️ TIEMPO EXCEDIDO — se aplicará penalización</div>
+  <div class="transcript-wrap" id="transcriptWrap">
+    <span style="color:#334155;font-style:italic">Escuchando…</span>
+  </div>
+  <button class="fin-btn" id="finBtn" onclick="finalize()">✓ Finalizar intervención</button>
+</div>
+
+<!-- ══ DONE ══ -->
+<div id="sDone" class="screen off">
+  <div class="done-circle">✓</div>
+  <div class="done-lbl">¡Guardado!</div>
+</div>
+
+<script>
+// ─── WebSocket ─────────────────────────────────────────────────────────────
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+let ws;
+
+// ─── Estado ────────────────────────────────────────────────────────────────
+let currentTeam  = 'rojo';
+let currentRound = 1;
+let prevRound    = 1;
+let waitingForUpdate = false;  // true entre finalize() y el state_update de respuesta
+
+// ─── Grabación ─────────────────────────────────────────────────────────────
+let finalTranscript = '';
+let interimText     = '';
+let overtime        = false;
+let timeLeft        = 120;
+let timerInterval   = null;
+let recognition     = null;
+let recognizing     = false;
+
+// ─── Screens ───────────────────────────────────────────────────────────────
+const S = {
+  idle:      document.getElementById('sIdle'),
+  drawing:   document.getElementById('sDrawing'),
+  recording: document.getElementById('sRecording'),
+  done:      document.getElementById('sDone'),
+};
+function showScreen(name) {
+  for (const [k, el] of Object.entries(S))
+    el.classList.toggle('off', k !== name);
+}
+
+// ─── HTTPS check ───────────────────────────────────────────────────────────
+if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+  document.getElementById('httpsWarn').classList.remove('off');
+}
+
+// ─── Speech Recognition ────────────────────────────────────────────────────
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function buildRecognition() {
+  if (!SR) return null;
+  const r = new SR();
+  r.lang            = 'es-AR';
+  r.continuous      = true;
+  r.interimResults  = true;
+  r.maxAlternatives = 1;
+
+  r.onresult = (e) => {
+    interimText = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+      else interimText += e.results[i][0].transcript;
+    }
+    renderTranscript();
+    sendUpdate();
+  };
+
+  // Chrome móvil detiene recognition en silencio — reiniciar si seguimos grabando
+  r.onend = () => {
+    if (recognizing) {
+      try { r.start(); } catch (_) {}
+    }
+  };
+
+  r.onerror = (e) => {
+    if (e.error === 'no-speech') return;
+    if (e.error === 'not-allowed') {
+      alert('Permiso de micrófono denegado. Habilitalo en la configuración del navegador.');
+      cancelRecording();
+    }
+    console.warn('[speech]', e.error);
+  };
+
+  return r;
+}
+
+function renderTranscript() {
+  const wrap = document.getElementById('transcriptWrap');
+  const txt  = escHtml(finalTranscript);
+  const itr  = interimText ? `<span class="interim">${escHtml(interimText)}</span>` : '';
+  wrap.innerHTML = txt || itr
+    ? txt + itr
+    : '<span style="color:#334155;font-style:italic">Escuchando…</span>';
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── Timer ─────────────────────────────────────────────────────────────────
+function startTimer() {
+  timeLeft = 120; overtime = false;
+  timerInterval = setInterval(tick, 1000);
+  renderTimer();
+}
+function stopTimer() { clearInterval(timerInterval); timerInterval = null; }
+
+function tick() {
+  timeLeft--;
+  renderTimer();
+  if (timeLeft === 0) triggerOvertime();
+}
+
+function renderTimer() {
+  const el = document.getElementById('timerDisplay');
+  if (timeLeft > 0) {
+    const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
+    el.textContent = `${m}:${s.toString().padStart(2,'0')}`;
+    el.className   = timeLeft <= 30 ? 'timer warn' : 'timer';
+  } else {
+    const elapsed = Math.abs(timeLeft);
+    const m = Math.floor(elapsed / 60), s = elapsed % 60;
+    el.textContent = `+${m}:${s.toString().padStart(2,'0')}`;
+    el.className   = 'timer overtime';
+  }
+}
+
+function triggerOvertime() {
+  overtime = true;
+  document.getElementById('overtimeBar').classList.remove('off');
+  const btn = document.getElementById('finBtn');
+  btn.classList.add('overtime-mode');
+  btn.textContent = '✓ Finalizar (tiempo excedido)';
+  if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
+}
+
+// ─── Acciones de grabación ─────────────────────────────────────────────────
+function startRecording() {
+  if (!SR) {
+    alert('Tu navegador no soporta reconocimiento de voz.\nUsá Chrome en Android.');
+    return;
+  }
+
+  // Reset estado
+  finalTranscript = ''; interimText = ''; overtime = false;
+  document.getElementById('transcriptWrap').innerHTML =
+    '<span style="color:#334155;font-style:italic">Escuchando…</span>';
+  document.getElementById('overtimeBar').classList.add('off');
+  const btn = document.getElementById('finBtn');
+  btn.classList.remove('overtime-mode');
+  btn.textContent = '✓ Finalizar intervención';
+
+  // Actualizar label del equipo
+  const recTeam = document.getElementById('recTeam');
+  if (currentTeam === 'rojo') {
+    recTeam.textContent = '🔴 Equipo Rojo'; recTeam.className = 'rec-team rojo';
+  } else {
+    recTeam.textContent = '🔵 Equipo Azul'; recTeam.className = 'rec-team azul';
+  }
+  renderTimer();
+
+  showScreen('recording');
+
+  recognition = buildRecognition();
+  recognizing = true;
+  recognition.start();
+  startTimer();
+
+  wsSend('recording_status', { active: true, team: currentTeam });
+}
+
+function finalize() {
+  recognizing = false;
+  if (recognition) { try { recognition.stop(); } catch(_){} recognition = null; }
+  stopTimer();
+
+  const text = (finalTranscript + interimText).trim();
+  if (!text) { showScreen('idle'); return; }
+
+  wsSend('add_argument', { text, team: currentTeam, overtime });
+  wsSend('recording_status', { active: false });
+  waitingForUpdate = true;
+  showScreen('done');
+
+  // Fallback por si el WS no responde
+  setTimeout(() => {
+    if (!S.done.classList.contains('off')) showScreen('idle');
+  }, 4000);
+}
+
+function cancelRecording() {
+  recognizing = false;
+  if (recognition) { try { recognition.stop(); } catch(_){} recognition = null; }
+  stopTimer();
+  wsSend('recording_status', { active: false });
+  showScreen('idle');
+}
+
+// ─── Sorteo ────────────────────────────────────────────────────────────────
+function showDraw(team, onDone) {
+  showScreen('drawing');
+  const el = document.getElementById('drawResult');
+  el.classList.add('off');
+  setTimeout(() => {
+    el.textContent = team === 'rojo'
+      ? '🔴 Equipo Rojo comienza primero'
+      : '🔵 Equipo Azul comienza primero';
+    el.className = `draw-result ${team}`;
+    setTimeout(onDone, 1800);
+  }, 1400);
+}
+
+// ─── UI helpers ────────────────────────────────────────────────────────────
+function updateIdleUI(team, round) {
+  const card = document.getElementById('idleCard');
+  card.className = `team-card ${team}`;
+  document.getElementById('idleEmoji').textContent = team === 'rojo' ? '🔴' : '🔵';
+  const nm = document.getElementById('idleName');
+  nm.textContent = team === 'rojo' ? 'Equipo Rojo' : 'Equipo Azul';
+  nm.className   = `team-name ${team}`;
+  document.getElementById('idleRound').textContent = `Ronda ${round}`;
+}
+
+function sendUpdate() {
+  wsSend('transcript_update', { text: (finalTranscript + interimText).trim() });
+}
+
+function wsSend(type, data) {
+  if (ws?.readyState === WebSocket.OPEN)
+    ws.send(JSON.stringify({ type, data }));
+}
+
+// ─── WebSocket ─────────────────────────────────────────────────────────────
+function connect() {
+  ws = new WebSocket(`${wsProto}//${location.host}`);
+
+  ws.onopen = () => {
+    document.getElementById('dot').classList.add('on');
+    document.getElementById('statusText').textContent = 'Conectado';
+    wsSend('identify', { clientType: 'tablet' });
+  };
+
+  ws.onclose = () => {
+    document.getElementById('dot').classList.remove('on');
+    document.getElementById('statusText').textContent = 'Desconectado';
+    setTimeout(connect, 2000);
+  };
+
+  ws.onmessage = ({ data: raw }) => {
+    const { type, data } = JSON.parse(raw);
+    switch (type) {
+
+      case 'state_sync':
+        currentTeam  = data.team;
+        currentRound = data.round;
+        prevRound    = data.round;
+        updateIdleUI(data.team, data.round);
+        showScreen('idle');
+        break;
+
+      case 'state_update':
+        currentTeam  = data.team;
+        currentRound = data.round;
+
+        if (waitingForUpdate) {
+          // Venimos de finalize() — transicionar a idle (o sorteo si es ronda nueva)
+          waitingForUpdate = false;
+          const isNewRound = data.round > prevRound;
+          prevRound = data.round;
+          updateIdleUI(data.team, data.round);
+          if (isNewRound) {
+            showDraw(data.team, () => showScreen('idle'));
+          } else {
+            showScreen('idle');
+          }
+        } else {
+          prevRound = data.round;
+          // Si estamos en idle, actualizar la tarjeta
+          if (!S.idle.classList.contains('off')) {
+            updateIdleUI(data.team, data.round);
+          }
+        }
+        break;
+    }
+  };
+}
+
+connect();
+</script>
+</body>
+</html>

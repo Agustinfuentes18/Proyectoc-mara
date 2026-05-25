@@ -1,0 +1,17 @@
+{
+  "name": "el-senado",
+  "version": "1.0.0",
+  "description": "Simulación del Senado Argentino para actividad académica",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.0.4"
+  }
+}
