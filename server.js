@@ -191,6 +191,7 @@ const state = {
   entries:        [],   // { team, text, round, overtime, ts }
   round:          1,
   team:           initTeam,
+  firstTeam:      initTeam,  // equipo que siempre arranca cada ronda
   roundFirstTeam: initTeam,
   senators:       buildInitialSenators(),
   lastScores:     null,
@@ -224,10 +225,9 @@ function advanceTurn(team) {
   if (team === state.roundFirstTeam) {
     state.team = team === 'rojo' ? 'azul' : 'rojo';
   } else {
-    const first = Math.random() < 0.5 ? 'rojo' : 'azul';
     state.round++;
-    state.team           = first;
-    state.roundFirstTeam = first;
+    state.team           = state.firstTeam;
+    state.roundFirstTeam = state.firstTeam;
   }
 }
 
@@ -312,6 +312,7 @@ wss.on('connection', (ws) => {
         state.entries        = [];
         state.round          = 1;
         state.team           = newTeam;
+        state.firstTeam      = newTeam;
         state.roundFirstTeam = newTeam;
         state.senators       = buildInitialSenators();
         broadcast('state_update', snapshot());

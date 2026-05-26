@@ -659,7 +659,7 @@ function buildPDF({ analysis, scores, finalCounts, entries }) {
   const pct = v => `${Math.round((v || 0) * 100)}%`;
   doc.autoTable({
     startY: y,
-    head: [['Categoría', '🔵 Equipo Azul', '🔴 Equipo Rojo']],
+    head: [['Categoria', 'Equipo Azul', 'Equipo Rojo']],
     body: [
       ['Uso del Paper',        pct(scores.azul.score_paper),    pct(scores.rojo.score_paper)   ],
       ['Retórica',             pct(scores.azul.score_retorica), pct(scores.rojo.score_retorica)],
