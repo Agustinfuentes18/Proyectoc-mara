@@ -371,11 +371,16 @@ wss.on('connection', (ws) => {
 });
 
 // ─── Rutas HTTP ───────────────────────────────────────────────────────────────
-app.get('/control', (_, res) =>
+const noCache = (_, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+};
+
+app.get('/control', noCache, (_, res) =>
   res.sendFile(path.join(__dirname, 'public', 'control.html')));
-app.get('/senado',  (_, res) =>
+app.get('/senado',  noCache, (_, res) =>
   res.sendFile(path.join(__dirname, 'public', 'senado.html')));
-app.get('/tablet',  (_, res) =>
+app.get('/tablet',  noCache, (_, res) =>
   res.sendFile(path.join(__dirname, 'public', 'tablet.html')));
 
 app.get('/', (_, res) => res.redirect('/control'));
