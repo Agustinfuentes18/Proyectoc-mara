@@ -235,9 +235,10 @@ let prevRound    = 1;
 let waitingForUpdate = false;  // true entre finalize() y el state_update de respuesta
 
 // ─── Grabación ─────────────────────────────────────────────────────────────
-let finalTranscript = '';
-let interimText     = '';
-let overtime        = false;
+let finalTranscript    = '';
+let committedTranscript = ''; // finals de sesiones anteriores (al reiniciar por onend)
+let interimText        = '';
+let overtime           = false;
 let timeLeft        = 120;
 let timerInterval   = null;
 let recognition     = null;
@@ -272,11 +273,15 @@ function buildRecognition() {
   r.maxAlternatives = 1;
 
   r.onresult = (e) => {
+    // Reconstruir desde i=0 en vez de acumular con +=
+    // Evita duplicados cuando e.resultIndex no avanza correctamente
+    let sessionFinal = '';
     interimText = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) sessionFinal += e.results[i][0].transcript + ' ';
       else interimText += e.results[i][0].transcript;
     }
+    finalTranscript = committedTranscript + sessionFinal;
     renderTranscript();
     sendUpdate();
   };
@@ -284,6 +289,8 @@ function buildRecognition() {
   // Chrome móvil detiene recognition en silencio — reiniciar si seguimos grabando
   r.onend = () => {
     if (recognizing) {
+      // Guardar los finals de esta sesión antes de arrancar la siguiente
+      committedTranscript = finalTranscript;
       try { r.start(); } catch (_) {}
     }
   };
@@ -359,7 +366,7 @@ function startRecording() {
   }
 
   // Reset estado
-  finalTranscript = ''; interimText = ''; overtime = false;
+  finalTranscript = ''; committedTranscript = ''; interimText = ''; overtime = false;
   document.getElementById('transcriptWrap').innerHTML =
     '<span style="color:#334155;font-style:italic">Escuchando…</span>';
   document.getElementById('overtimeBar').classList.add('off');
