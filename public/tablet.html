@@ -236,6 +236,7 @@ let waitingForUpdate = false;  // true entre finalize() y el state_update de res
 
 // ─── Grabación ─────────────────────────────────────────────────────────────
 let finalTranscript    = '';
+let committedTranscript = '';
 let interimTranscript  = '';
 let overtime           = false;
 let timeLeft        = 120;
@@ -272,18 +273,23 @@ function buildRecognition() {
   r.maxAlternatives = 1;
 
   r.onresult = (e) => {
+    // Reconstruir desde i=0 para evitar duplicados cuando Chrome
+    // no avanza e.resultIndex correctamente en móvil
+    let sessionFinal = '';
     interimTranscript = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) sessionFinal += e.results[i][0].transcript;
       else interimTranscript = e.results[i][0].transcript;
     }
+    finalTranscript = committedTranscript + sessionFinal;
     renderTranscript();
     sendUpdate();
   };
 
-  // Chrome móvil detiene recognition en silencio — reiniciar si seguimos grabando
+  // Chrome móvil detiene recognition en silencio — reiniciar preservando finals
   r.onend = () => {
     if (recognizing) {
+      committedTranscript = finalTranscript;
       try { r.start(); } catch (_) {}
     }
   };
@@ -359,7 +365,7 @@ function startRecording() {
   }
 
   // Reset estado
-  finalTranscript = ''; interimTranscript = ''; overtime = false;
+  finalTranscript = ''; committedTranscript = ''; interimTranscript = ''; overtime = false;
   document.getElementById('transcriptWrap').innerHTML =
     '<span style="color:#334155;font-style:italic">Escuchando…</span>';
   document.getElementById('overtimeBar').classList.add('off');
