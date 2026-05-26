@@ -84,6 +84,68 @@ Respondé ÚNICAMENTE con JSON válido con esta estructura exacta, sin texto adi
   return JSON.parse(text);
 }
 
+// ─── Gemini: informe narrativo ────────────────────────────────────────────────
+async function callGeminiReport(paper, entries, scores, finalCounts) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('Falta GEMINI_API_KEY');
+
+  const history = entries.map(e => {
+    const label = e.team === 'azul' ? 'Equipo Azul' : 'Equipo Rojo';
+    const ot    = e.overtime ? ' [TIEMPO EXCEDIDO]' : '';
+    return `[Ronda ${e.round}] ${label}${ot}: "${e.text}"`;
+  }).join('\n');
+
+  const pct       = v => `${Math.round(v * 100)}%`;
+  const roundNums = [...new Set(entries.map(e => e.round))].sort((a, b) => a - b);
+
+  const prompt = `Sos un analista parlamentario. Evaluá el siguiente debate y elaborá un informe.
+
+PUNTAJES FINALES:
+- Equipo Azul: Paper ${pct(scores.azul.score_paper)} | Retórica ${pct(scores.azul.score_retorica)} | Contra-arg ${pct(scores.azul.score_contra)}
+- Equipo Rojo: Paper ${pct(scores.rojo.score_paper)} | Retórica ${pct(scores.rojo.score_retorica)} | Contra-arg ${pct(scores.rojo.score_contra)}
+
+RESULTADO EN EL SENADO: ${finalCounts.azul} a favor | ${finalCounts.amarillo} indecisos | ${finalCounts.rojo} en contra
+
+HISTORIAL DEL DEBATE:
+${history}
+
+Respondé ÚNICAMENTE con JSON válido con esta estructura:
+{
+  "ganador": "azul",
+  "explicacion": "2-3 oraciones explicando por qué ganó ese equipo basándote en los puntajes y los argumentos.",
+  "argumento_fuerte": {
+    "azul": { "texto": "cita textual exacta del argumento más impactante del equipo azul", "razon": "una oración sobre por qué fue el más efectivo" },
+    "rojo": { "texto": "cita textual exacta del argumento más impactante del equipo rojo", "razon": "una oración sobre por qué fue el más efectivo" }
+  },
+  "rondas": [${roundNums.map(r => `{"numero":${r},"azul":0.0,"rojo":0.0}`).join(',')}]
+}
+
+Para "rondas": estimá el impacto acumulado de los argumentos al finalizar cada ronda (0.0–1.0).
+Para "ganador": usá "azul", "rojo" o "empate".`;
+
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+    }
+  );
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Gemini informe ${resp.status}: ${err.slice(0, 200)}`);
+  }
+
+  const result = await resp.json();
+  const text   = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Respuesta vacía de Gemini');
+  return JSON.parse(text);
+}
+
 // ─── Modelo de votación ───────────────────────────────────────────────────────
 const WEIGHTS = {
   academico: { paper: 0.60, retorica: 0.25, contra: 0.15 },
@@ -131,6 +193,7 @@ const state = {
   team:           initTeam,
   roundFirstTeam: initTeam,
   senators:       buildInitialSenators(),
+  lastScores:     null,
 };
 
 // ─── Helpers WebSocket ────────────────────────────────────────────────────────
@@ -216,6 +279,46 @@ wss.on('connection', (ws) => {
         broadcast('recording_status', data, ws);
         break;
 
+      case 'generate_report': {
+        if (!state.lastScores) {
+          send(ws, 'report_error', { msg: 'No hay votación calculada todavía.' });
+          break;
+        }
+        const finalCounts = { azul: 0, amarillo: 0, rojo: 0 };
+        state.senators.forEach(s => { finalCounts[s.stance]++; });
+
+        send(ws, 'report_loading', {});
+        console.log('[gemini] generando informe…');
+
+        callGeminiReport(state.paper, state.entries, state.lastScores, finalCounts)
+          .then(analysis => {
+            send(ws, 'report_data', {
+              analysis,
+              scores:      state.lastScores,
+              finalCounts,
+              entries:     state.entries,
+            });
+            console.log('[gemini] informe generado');
+          })
+          .catch(err => {
+            console.error('[gemini] error en informe:', err.message);
+            send(ws, 'report_error', { msg: err.message });
+          });
+        break;
+      }
+
+      case 'reset_session': {
+        const newTeam = Math.random() < 0.5 ? 'rojo' : 'azul';
+        state.entries        = [];
+        state.round          = 1;
+        state.team           = newTeam;
+        state.roundFirstTeam = newTeam;
+        state.senators       = buildInitialSenators();
+        broadcast('state_update', snapshot());
+        console.log('[ws] sesión reiniciada');
+        break;
+      }
+
       case 'calculate_votes': {
         if (!state.paper) {
           send(ws, 'vote_error', { msg: 'No hay paper/blog cargado.' });
@@ -246,6 +349,7 @@ wss.on('connection', (ws) => {
               .filter(s => s.stance !== before.get(s.id))
               .map(s => ({ id: s.id, from: before.get(s.id), to: s.stance }));
 
+            state.lastScores = scores;
             broadcast('vote_animation', { changes, final: state.senators });
             send(ws, 'vote_result', { scores });
             console.log(`[gemini] ${changes.length} senadores cambiaron | scores:`, JSON.stringify(scores));

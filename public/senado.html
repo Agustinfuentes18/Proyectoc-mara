@@ -13,7 +13,7 @@ html, body {
 }
 
 header {
-  padding: 20px 0 6px;
+  padding: 10px 0 4px;
   text-align: center;
   flex-shrink: 0;
 }
@@ -32,13 +32,12 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 24px;
+  padding: 0 8px;
   min-height: 0;
 }
 
 #hemiciclo {
-  width: 100%;
-  max-width: 1100px;
+  width: min(86vw, calc((100vh - 220px) * 800 / 390));
   height: auto;
   display: block;
 }
@@ -154,7 +153,7 @@ footer {
 </header>
 
 <div class="hemiciclo-wrap">
-  <svg id="hemiciclo" viewBox="0 0 800 310" xmlns="http://www.w3.org/2000/svg"></svg>
+  <svg id="hemiciclo" viewBox="0 0 800 390" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
 
 <footer>
@@ -204,14 +203,14 @@ footer {
 
 <script>
 // ── Layout del hemiciclo ─────────────────────────────────────────
-const CX = 400, CY = 295;
+const CX = 400, CY = 372;
 const ROWS = [
-  { r: 100, count: 10 },
-  { r: 158, count: 15 },
-  { r: 216, count: 21 },
-  { r: 274, count: 26 },
+  { r: 125, count: 10 },
+  { r: 200, count: 15 },
+  { r: 270, count: 21 },
+  { r: 345, count: 26 },
 ];
-const R_SENATOR = 13;
+const R_SENATOR = 17;
 const COLORS = { azul: '#3b82f6', amarillo: '#eab308', rojo: '#ef4444' };
 
 function buildPositions() {

@@ -106,6 +106,7 @@ button:active { filter: brightness(.9); }
 .btn-ghost   { background: var(--border); color: var(--text); }
 .btn-success { background: #16a34a; color: #fff; }
 .btn-purple  { background: #7c3aed; color: #fff; }
+.btn-danger  { background: rgba(220,38,38,.12); color: #fca5a5; border: 1px solid rgba(220,38,38,.4); }
 .btn-full    { width: 100%; padding: 11px; font-size: .9rem; }
 .row { display: flex; gap: 8px; margin-top: 8px; }
 .row .f1 { flex: 1; }
@@ -244,7 +245,10 @@ button:active { filter: brightness(.9); }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.btn-pdf { background: rgba(99,102,241,.15); color: #c7d2fe; border: 1px solid rgba(99,102,241,.4); }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
 
@@ -308,6 +312,12 @@ button:active { filter: brightness(.9); }
       </button>
       <button class="btn-ghost btn-full" onclick="testConexion()">
         📡 Test de conexión
+      </button>
+      <button class="btn-pdf btn-full" id="pdfBtn" onclick="downloadPDF()" style="display:none">
+        📄 Descargar informe PDF
+      </button>
+      <button class="btn-danger btn-full" onclick="resetSession()">
+        🔄 Reiniciar sesión
       </button>
     </div>
 
@@ -384,7 +394,21 @@ function connect() {
       case 'vote_result':
         setVoteLoading(false);
         showScores(data.scores);
+        document.getElementById('pdfBtn').style.display = 'block';
         notify('¡Votación calculada!');
+        break;
+
+      case 'report_loading':
+        setPdfLoading(true);
+        break;
+
+      case 'report_data':
+        buildPDF(data);
+        break;
+
+      case 'report_error':
+        setPdfLoading(false);
+        notify(data.msg, true);
         break;
 
       case 'vote_error':
@@ -531,6 +555,215 @@ function showScores(scores) {
 function testConexion() {
   ws.send(JSON.stringify({ type: 'test_event', data: {} }));
   notify('Test enviado');
+}
+
+function downloadPDF() {
+  ws.send(JSON.stringify({ type: 'generate_report', data: {} }));
+}
+
+function setPdfLoading(on) {
+  const btn = document.getElementById('pdfBtn');
+  btn.disabled = on;
+  btn.textContent = on ? '⏳ Generando informe…' : '📄 Descargar informe PDF';
+}
+
+function buildPDF({ analysis, scores, finalCounts, entries }) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const M = 18;
+  let y = 22;
+
+  const C = {
+    azul:     [37,  99,  235],
+    rojo:     [220, 38,  38 ],
+    amarillo: [234, 179, 8  ],
+    dark:     [15,  23,  42 ],
+    mid:      [51,  65,  85 ],
+    muted:    [100, 116, 139],
+    light:    [248, 250, 252],
+    line:     [226, 232, 240],
+  };
+
+  const teamColor = t => t === 'azul' ? C.azul : t === 'rojo' ? C.rojo : C.amarillo;
+  const teamLabel = t => t === 'azul' ? 'Equipo Azul' : t === 'rojo' ? 'Equipo Rojo' : 'Empate';
+
+  function needPage(h = 30) {
+    if (y + h > H - 16) { doc.addPage(); y = 20; }
+  }
+
+  function section(title) {
+    needPage(16);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...C.mid);
+    doc.text(title.toUpperCase(), M, y);
+    doc.setDrawColor(...C.line);
+    doc.line(M, y + 2, W - M, y + 2);
+    y += 9;
+  }
+
+  // ── Encabezado ──
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.setTextColor(...C.dark);
+  doc.text('El Senado', M, y);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.setTextColor(...C.muted);
+  doc.text('Informe de Debate Parlamentario', M, y + 7);
+  const dateStr = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
+  doc.text(dateStr, W - M, y + 7, { align: 'right' });
+  doc.setDrawColor(...C.line);
+  doc.line(M, y + 12, W - M, y + 12);
+  y += 21;
+
+  // ── Resultado final ──
+  section('Resultado Final');
+  const bw = (W - M * 2 - 8) / 3;
+  [[C.azul, 'A Favor', finalCounts.azul],
+   [C.amarillo, 'Indecisos', finalCounts.amarillo],
+   [C.rojo, 'En Contra', finalCounts.rojo],
+  ].forEach(([color, label, count], i) => {
+    const x = M + i * (bw + 4);
+    doc.setFillColor(...color);
+    doc.roundedRect(x, y, bw, 18, 2, 2, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text(String(count), x + bw / 2, y + 10, { align: 'center' });
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.text(label, x + bw / 2, y + 15.5, { align: 'center' });
+  });
+  y += 26;
+
+  // ── Ganador ──
+  section('Ganador del Debate');
+  const gTeam = analysis.ganador;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(...teamColor(gTeam));
+  doc.text(teamLabel(gTeam), M, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(...C.dark);
+  const expLines = doc.splitTextToSize(analysis.explicacion || '', W - M * 2);
+  doc.text(expLines, M, y);
+  y += expLines.length * 5 + 9;
+
+  // ── Puntajes Gemini ──
+  section('Puntajes por Equipo');
+  const pct = v => `${Math.round((v || 0) * 100)}%`;
+  doc.autoTable({
+    startY: y,
+    head: [['Categoría', '🔵 Equipo Azul', '🔴 Equipo Rojo']],
+    body: [
+      ['Uso del Paper',        pct(scores.azul.score_paper),    pct(scores.rojo.score_paper)   ],
+      ['Retórica',             pct(scores.azul.score_retorica), pct(scores.rojo.score_retorica)],
+      ['Contra-argumentación', pct(scores.azul.score_contra),   pct(scores.rojo.score_contra)  ],
+    ],
+    styles:      { fontSize: 9, cellPadding: 4 },
+    headStyles:  { fillColor: [30, 41, 59], textColor: [241, 245, 249] },
+    columnStyles: {
+      0: { fontStyle: 'bold', textColor: C.mid },
+      1: { textColor: C.azul, fontStyle: 'bold', halign: 'center' },
+      2: { textColor: C.rojo, fontStyle: 'bold', halign: 'center' },
+    },
+    margin: { left: M, right: M },
+  });
+  y = doc.lastAutoTable.finalY + 10;
+
+  // ── Argumentos más fuertes ──
+  section('Argumento más fuerte por equipo');
+  for (const team of ['azul', 'rojo']) {
+    const arg = analysis.argumento_fuerte?.[team];
+    if (!arg) continue;
+    needPage(28);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...teamColor(team));
+    doc.text(teamLabel(team), M, y);
+    y += 5.5;
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    const argLines = doc.splitTextToSize(`"${arg.texto || ''}"`, W - M * 2 - 4);
+    doc.text(argLines, M + 2, y);
+    y += argLines.length * 4.8 + 2;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...C.muted);
+    const razonLines = doc.splitTextToSize(arg.razon || '', W - M * 2 - 4);
+    doc.text(razonLines, M + 2, y);
+    y += razonLines.length * 4.5 + 8;
+  }
+
+  // ── Detalle por ronda ──
+  section('Detalle por Ronda');
+  const byRound = {};
+  entries.forEach(e => { (byRound[e.round] = byRound[e.round] || []).push(e); });
+  const roundScores = {};
+  (analysis.rondas || []).forEach(r => { roundScores[r.numero] = r; });
+
+  for (const [rNum, rEntries] of Object.entries(byRound).sort((a, b) => Number(a[0]) - Number(b[0]))) {
+    needPage(28);
+    const rs = roundScores[Number(rNum)];
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...C.dark);
+    doc.text(`Ronda ${rNum}`, M, y);
+    if (rs) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...C.muted);
+      doc.text(
+        `Impacto acumulado — Azul: ${Math.round((rs.azul || 0) * 100)}%   Rojo: ${Math.round((rs.rojo || 0) * 100)}%`,
+        M + 24, y,
+      );
+    }
+    y += 5;
+
+    doc.autoTable({
+      startY: y,
+      body: rEntries.map(e => [
+        (e.team === 'azul' ? 'Equipo Azul' : 'Equipo Rojo') + (e.overtime ? ' ⏱' : ''),
+        e.text,
+      ]),
+      styles: { fontSize: 8.5, cellPadding: 3.5, lineColor: C.line, lineWidth: 0.2 },
+      alternateRowStyles: { fillColor: C.light },
+      columnStyles: { 0: { cellWidth: 34, fontStyle: 'bold' } },
+      didParseCell(data) {
+        if (data.column.index === 0 && data.section === 'body') {
+          data.cell.styles.textColor = String(data.cell.raw).includes('Azul') ? C.azul : C.rojo;
+        }
+      },
+      margin: { left: M, right: M },
+    });
+    y = doc.lastAutoTable.finalY + 9;
+  }
+
+  const filename = `informe-senado-${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(filename);
+  setPdfLoading(false);
+  notify('Informe descargado');
+}
+
+function resetSession() {
+  const ok = confirm(
+    '¿Reiniciar la sesión?\n\n' +
+    '• Se borrarán todos los argumentos del debate\n' +
+    '• El contador de rondas vuelve a 1\n' +
+    '• El Senado vuelve a 24 azules / 24 amarillos / 24 rojos\n\n' +
+    'Esta acción no se puede deshacer.'
+  );
+  if (!ok) return;
+  ws.send(JSON.stringify({ type: 'reset_session', data: {} }));
+  document.getElementById('scoresPanel').classList.remove('visible');
+  document.getElementById('argInput').value = '';
+  notify('Sesión reiniciada');
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
