@@ -236,8 +236,7 @@ let waitingForUpdate = false;  // true entre finalize() y el state_update de res
 
 // ─── Grabación ─────────────────────────────────────────────────────────────
 let finalTranscript    = '';
-let committedTranscript = ''; // finals de sesiones anteriores (al reiniciar por onend)
-let interimText        = '';
+let interimTranscript  = '';
 let overtime           = false;
 let timeLeft        = 120;
 let timerInterval   = null;
@@ -273,15 +272,11 @@ function buildRecognition() {
   r.maxAlternatives = 1;
 
   r.onresult = (e) => {
-    // Reconstruir desde i=0 en vez de acumular con +=
-    // Evita duplicados cuando e.resultIndex no avanza correctamente
-    let sessionFinal = '';
-    interimText = '';
-    for (let i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) sessionFinal += e.results[i][0].transcript + ' ';
-      else interimText += e.results[i][0].transcript;
+    interimTranscript = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+      else interimTranscript = e.results[i][0].transcript;
     }
-    finalTranscript = committedTranscript + sessionFinal;
     renderTranscript();
     sendUpdate();
   };
@@ -289,8 +284,6 @@ function buildRecognition() {
   // Chrome móvil detiene recognition en silencio — reiniciar si seguimos grabando
   r.onend = () => {
     if (recognizing) {
-      // Guardar los finals de esta sesión antes de arrancar la siguiente
-      committedTranscript = finalTranscript;
       try { r.start(); } catch (_) {}
     }
   };
@@ -310,7 +303,7 @@ function buildRecognition() {
 function renderTranscript() {
   const wrap = document.getElementById('transcriptWrap');
   const txt  = escHtml(finalTranscript);
-  const itr  = interimText ? `<span class="interim">${escHtml(interimText)}</span>` : '';
+  const itr  = interimTranscript ? `<span class="interim">${escHtml(interimTranscript)}</span>` : '';
   wrap.innerHTML = txt || itr
     ? txt + itr
     : '<span style="color:#334155;font-style:italic">Escuchando…</span>';
@@ -366,7 +359,7 @@ function startRecording() {
   }
 
   // Reset estado
-  finalTranscript = ''; committedTranscript = ''; interimText = ''; overtime = false;
+  finalTranscript = ''; interimTranscript = ''; overtime = false;
   document.getElementById('transcriptWrap').innerHTML =
     '<span style="color:#334155;font-style:italic">Escuchando…</span>';
   document.getElementById('overtimeBar').classList.add('off');
@@ -398,7 +391,7 @@ function finalize() {
   if (recognition) { try { recognition.stop(); } catch(_){} recognition = null; }
   stopTimer();
 
-  const text = (finalTranscript + interimText).trim();
+  const text = (finalTranscript + interimTranscript).trim();
   if (!text) { showScreen('idle'); return; }
 
   wsSend('add_argument', { text, team: currentTeam, overtime });
@@ -446,7 +439,7 @@ function updateIdleUI(team, round) {
 }
 
 function sendUpdate() {
-  wsSend('transcript_update', { text: (finalTranscript + interimText).trim() });
+  wsSend('transcript_update', { text: finalTranscript.trim() });
 }
 
 function wsSend(type, data) {
