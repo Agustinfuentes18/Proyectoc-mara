@@ -60,7 +60,7 @@ main {
 .left {
   background: var(--surface);
   border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow-y: auto;
 }
 
 .section {
@@ -115,9 +115,9 @@ button:active { filter: brightness(.9); }
 .arg-section {
   flex: 1; display: flex; flex-direction: column;
   padding: 14px 16px; border-bottom: 1px solid var(--border);
-  overflow: hidden; min-height: 0;
+  min-height: 220px;
 }
-.arg-section textarea { flex: 1; resize: none; min-height: 60px; }
+.arg-section textarea { height: 140px; resize: none; overflow-y: auto; }
 
 .actions {
   padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
@@ -241,6 +241,21 @@ button:active { filter: brightness(.9); }
   border-radius: 4px; padding: 4px 8px;
 }
 
+/* Modo de votación */
+.mode-toggle {
+  display: flex; border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--border);
+}
+.mode-btn {
+  flex: 1; padding: 7px 10px; border: none; border-radius: 0;
+  background: var(--bg); color: var(--muted);
+  font-size: .78rem; font-weight: 600; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.mode-btn:hover:not(.active) { background: var(--border); color: var(--text); filter: none; }
+.mode-btn.active { background: #7c3aed; color: #fff; }
+.mode-note { font-size: .7rem; color: var(--muted); margin-top: 6px; }
+
 /* scrollbar sutil */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -276,15 +291,17 @@ button:active { filter: brightness(.9); }
       <div id="paperBody">
         <textarea id="paperInput" rows="5"
           placeholder="Pegá acá el blog o paper que servirá de contexto para los senadores de Gemini..."></textarea>
-        <div class="row">
+        <input type="file" id="pdfFileInput" accept=".pdf" style="display:none" onchange="handlePdfUpload(event)">
+        <div class="row" style="margin-top:8px">
+          <button class="btn-ghost" onclick="document.getElementById('pdfFileInput').click()" title="Extraer texto de un PDF">📎 Subir PDF</button>
           <button class="btn-primary f1" onclick="savePaper()">Guardar contexto</button>
-          <span id="paperAck" style="font-size:.72rem;color:var(--muted);align-self:center;white-space:nowrap"></span>
         </div>
+        <span id="paperAck" style="display:block;margin-top:5px;font-size:.72rem;color:var(--muted)"></span>
       </div>
     </div>
 
     <!-- Sección argumento actual -->
-    <div class="arg-section">
+    <div class="arg-section" id="argSection">
       <div class="sec-title">
         Argumento actual
         <span id="liveIndicator" style="display:none;font-size:.7rem;background:var(--rojo);color:#fff;padding:2px 8px;border-radius:4px;font-weight:700;animation:blink-in .7s ease-in-out infinite">● EN VIVO</span>
@@ -305,10 +322,25 @@ button:active { filter: brightness(.9); }
       </div>
     </div>
 
+    <!-- Modo de votación -->
+    <div class="section">
+      <div class="sec-title">Modo de votación</div>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="modeBtn-final" onclick="setMode('final')">Cálculo final</button>
+        <button class="mode-btn" id="modeBtn-por_ronda" onclick="setMode('por_ronda')">Por ronda</button>
+      </div>
+      <div class="mode-note" id="modeNote" style="display:none">
+        Votación automática al finalizar cada ronda
+      </div>
+    </div>
+
     <!-- Botones principales -->
     <div class="actions">
       <button class="btn-purple btn-full" id="voteBtn" onclick="calcularVotos()">
         🗳️ Calcular y votar
+      </button>
+      <button class="btn-success btn-full" id="btnTerminar" onclick="downloadPDF()" style="display:none">
+        📋 Terminar debate — Generar informe final
       </button>
       <button class="btn-ghost btn-full" onclick="testConexion()">
         📡 Test de conexión
@@ -355,6 +387,31 @@ button:active { filter: brightness(.9); }
 <div class="test-flash" id="testFlash">📡 Test recibido en todos los clientes</div>
 
 <script>
+// ── Subida de PDF ─────────────────────────────────────────────────────────────
+async function handlePdfUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const ack = document.getElementById('paperAck');
+  ack.textContent = '⏳ Subiendo PDF…';
+  try {
+    const resp = await fetch('/upload-paper', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/pdf', 'X-Filename': file.name },
+      body:    file,
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { kb, name } = await resp.json();
+    ack.textContent = `📄 ${name} · ${kb} KB`;
+    document.getElementById('paperInput').value = '';
+    notify('PDF listo — Gemini lo leerá directamente');
+  } catch (err) {
+    ack.textContent = '';
+    notify('Error al subir el PDF', true);
+    console.error('[pdf-upload]', err);
+  }
+  event.target.value = '';
+}
+
 // ── WebSocket ────────────────────────────────────────────────────────────────
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 let ws;
@@ -389,13 +446,20 @@ function connect() {
         break;
       case 'vote_loading':
         setVoteLoading(true);
+        if (currentMode === 'por_ronda') setArgInputEnabled(false);
         break;
 
       case 'vote_result':
         setVoteLoading(false);
-        showScores(data.scores);
-        document.getElementById('pdfBtn').style.display = 'block';
-        notify('¡Votación calculada!');
+        if (currentMode === 'final') {
+          showScores(data.scores);
+          document.getElementById('pdfBtn').style.display = 'block';
+          notify('¡Votación calculada!');
+        } else {
+          setArgInputEnabled(true);
+          document.getElementById('argInput').focus();
+          notify('Ronda calculada');
+        }
         break;
 
       case 'report_loading':
@@ -413,6 +477,7 @@ function connect() {
 
       case 'vote_error':
         setVoteLoading(false);
+        if (currentMode === 'por_ronda') setArgInputEnabled(true);
         notify(data.msg, true);
         break;
       case 'transcript_update': {
@@ -437,6 +502,10 @@ function setStatus(ok) {
 
 // ── Render estado ────────────────────────────────────────────────────────────
 function applyState(s) {
+  if (s.mode) updateModeUI(s.mode);
+  if (!s.paperSet) {
+    document.getElementById('paperAck').textContent = '';
+  }
   document.getElementById('roundChip').textContent = `Ronda ${s.round}`;
 
   const chip = document.getElementById('teamChip');
@@ -494,7 +563,8 @@ function esc(s) {
 
 // ── Acciones ─────────────────────────────────────────────────────────────────
 function savePaper() {
-  const text = document.getElementById('paperInput').value;
+  const text = document.getElementById('paperInput').value.trim();
+  if (!text) { notify('El campo de texto está vacío', true); return; }
   ws.send(JSON.stringify({ type: 'set_paper', data: { text } }));
 }
 
@@ -518,6 +588,29 @@ function listo() {
 
 function calcularVotos() {
   ws.send(JSON.stringify({ type: 'calculate_votes', data: {} }));
+}
+
+let currentMode = 'final';
+
+function setMode(mode) {
+  ws.send(JSON.stringify({ type: 'set_mode', data: { mode } }));
+  updateModeUI(mode);
+}
+
+function updateModeUI(mode) {
+  currentMode = mode;
+  document.getElementById('modeBtn-final').classList.toggle('active', mode === 'final');
+  document.getElementById('modeBtn-por_ronda').classList.toggle('active', mode === 'por_ronda');
+  document.getElementById('modeNote').style.display     = mode === 'por_ronda' ? 'block' : 'none';
+  document.getElementById('voteBtn').style.display      = mode === 'final'     ? 'flex'  : 'none';
+  document.getElementById('btnTerminar').style.display  = mode === 'por_ronda' ? 'flex'  : 'none';
+}
+
+function setArgInputEnabled(on) {
+  const section = document.getElementById('argSection');
+  if (!section) return;
+  section.style.opacity       = on ? '' : '0.4';
+  section.style.pointerEvents = on ? '' : 'none';
 }
 
 function setVoteLoading(on) {
@@ -562,9 +655,13 @@ function downloadPDF() {
 }
 
 function setPdfLoading(on) {
-  const btn = document.getElementById('pdfBtn');
-  btn.disabled = on;
-  btn.textContent = on ? '⏳ Generando informe…' : '📄 Descargar informe PDF';
+  const pdfBtn  = document.getElementById('pdfBtn');
+  pdfBtn.disabled    = on;
+  pdfBtn.textContent = on ? '⏳ Generando informe…' : '📄 Descargar informe PDF';
+
+  const termBtn  = document.getElementById('btnTerminar');
+  termBtn.disabled    = on;
+  termBtn.textContent = on ? '⏳ Generando informe…' : '📋 Terminar debate — Generar informe final';
 }
 
 function buildPDF({ analysis, scores, finalCounts, entries }) {

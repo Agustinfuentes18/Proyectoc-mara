@@ -35,7 +35,7 @@ function buildInitialSenators() {
 }
 
 // ─── Gemini API ───────────────────────────────────────────────────────────────
-async function callGemini(paper, entries) {
+async function callGemini(paper, entries, paperBase64 = null) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('Falta la variable de entorno GEMINI_API_KEY');
 
@@ -45,15 +45,7 @@ async function callGemini(paper, entries) {
     return `${label}${tag}: "${e.text}"`;
   }).join('\n');
 
-  const prompt = `Sos un analista de debates parlamentarios. Evaluá la calidad de los argumentos de dos equipos debatiendo sobre el siguiente material de referencia.
-
-MATERIAL DE REFERENCIA:
-${paper}
-
-HISTORIAL DEL DEBATE:
-${history}
-
-Evaluá los argumentos de cada equipo en tres dimensiones (valores entre 0.0 y 1.0):
+  const evalInstructions = `Evaluá los argumentos de cada equipo en tres dimensiones (valores entre 0.0 y 1.0):
 - score_paper: qué tan bien usaron y citaron el material de referencia
 - score_retorica: calidad retórica, claridad y poder de persuasión
 - score_contra: qué tan efectivamente rebatieron los argumentos del equipo contrario
@@ -61,14 +53,37 @@ Evaluá los argumentos de cada equipo en tres dimensiones (valores entre 0.0 y 1
 Respondé ÚNICAMENTE con JSON válido con esta estructura exacta, sin texto adicional:
 {"azul":{"score_paper":0.0,"score_retorica":0.0,"score_contra":0.0},"rojo":{"score_paper":0.0,"score_retorica":0.0,"score_contra":0.0}}`;
 
+  let parts;
+  if (paperBase64) {
+    parts = [
+      { inlineData: { mimeType: 'application/pdf', data: paperBase64 } },
+      { text: `Sos un analista de debates parlamentarios. El documento adjunto es el material de referencia del debate. Evaluá la calidad de los argumentos de dos equipos debatiendo sobre dicho material.
+
+HISTORIAL DEL DEBATE:
+${history}
+
+${evalInstructions}` },
+    ];
+  } else {
+    parts = [{ text: `Sos un analista de debates parlamentarios. Evaluá la calidad de los argumentos de dos equipos debatiendo sobre el siguiente material de referencia.
+
+MATERIAL DE REFERENCIA:
+${paper}
+
+HISTORIAL DEL DEBATE:
+${history}
+
+${evalInstructions}` }];
+  }
+
   const resp = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json' },
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0, thinkingConfig: { thinkingBudget: 0 } },
       }),
     }
   );
@@ -161,8 +176,18 @@ function senatorType(id) {
 }
 
 function runVoting(scores) {
-  state.senators = state.senators.map(senator => {
-    const w  = WEIGHTS[senatorType(senator.id)];
+  // Agrupar por (tipo, estado) para aplicar P como fracción determinista
+  const groups = new Map();
+  for (const senator of state.senators) {
+    const key = `${senatorType(senator.id)}|${senator.stance}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(senator);
+  }
+
+  const updated = new Map();
+  for (const [key, senators] of groups) {
+    const [type, stance] = key.split('|');
+    const w  = WEIGHTS[type];
     const sa = w.paper * scores.azul.score_paper
              + w.retorica * scores.azul.score_retorica
              + w.contra   * scores.azul.score_contra;
@@ -171,23 +196,90 @@ function runVoting(scores) {
              + w.contra   * scores.rojo.score_contra;
 
     const delta = sa - sr;
-    const k     = senator.stance === 'amarillo' ? 3 : 1.2;
+    const k     = stance === 'amarillo' ? 3 : 1.2;
     const pAzul = 1 / (1 + Math.exp(-k * delta));
 
-    let newStance;
-    if (Math.random() < pAzul) {
-      newStance = senator.stance === 'rojo' ? 'amarillo' : 'azul';
-    } else {
-      newStance = senator.stance === 'azul' ? 'amarillo' : 'rojo';
+    // Exactamente round(pAzul * n) se mueven hacia azul, el resto hacia rojo
+    const nAzul = Math.round(pAzul * senators.length);
+    senators.forEach((senator, i) => {
+      let newStance;
+      if (i < nAzul) {
+        newStance = stance === 'rojo' ? 'amarillo' : 'azul';
+      } else {
+        newStance = stance === 'azul' ? 'amarillo' : 'rojo';
+      }
+      updated.set(senator.id, { ...senator, stance: newStance });
+    });
+  }
+
+  state.senators = state.senators.map(s => updated.get(s.id));
+}
+
+// ─── Corrección de consistencia ───────────────────────────────────────────────
+// Senadores por tipo: 30 académicos (pos 0-9), 21 retóricos (10-16), 21 twitteros (17-23)
+const TYPE_N = { academico: 30, retorico: 21, twittero: 21 };
+
+function applyConsistencyCorrection(scores) {
+  // Score ponderado total: promedio pesado por cantidad de senadores de cada tipo
+  const saByType = {}, srByType = {};
+  let totalAzul = 0, totalRojo = 0;
+  for (const type of ['academico', 'retorico', 'twittero']) {
+    const w = WEIGHTS[type];
+    saByType[type] = w.paper * scores.azul.score_paper + w.retorica * scores.azul.score_retorica + w.contra * scores.azul.score_contra;
+    srByType[type] = w.paper * scores.rojo.score_paper  + w.retorica * scores.rojo.score_retorica  + w.contra * scores.rojo.score_contra;
+    totalAzul += TYPE_N[type] * saByType[type];
+    totalRojo  += TYPE_N[type] * srByType[type];
+  }
+  if (Math.abs(totalAzul - totalRojo) < 1e-9) return;
+
+  const winner = totalAzul > totalRojo ? 'azul' : 'rojo';
+  const loser  = winner === 'azul' ? 'rojo' : 'azul';
+
+  const stanceMap = new Map(state.senators.map(s => [s.id, s.stance]));
+  const count = st => [...stanceMap.values()].filter(v => v === st).length;
+  if (count(winner) >= count(loser)) return;
+
+  const pAzulFor = (id, stance) => {
+    const k = stance === 'amarillo' ? 3 : 1.2;
+    const t = senatorType(id);
+    return 1 / (1 + Math.exp(-k * (saByType[t] - srByType[t])));
+  };
+  const deltaFor = id => { const t = senatorType(id); return saByType[t] - srByType[t]; };
+
+  // Paso 1: amarillos con mayor probabilidad logit de ser del equipo ganador
+  const amarillos = state.senators
+    .filter(s => stanceMap.get(s.id) === 'amarillo')
+    .map(s => ({ id: s.id, pW: winner === 'azul' ? pAzulFor(s.id, 'amarillo') : 1 - pAzulFor(s.id, 'amarillo') }))
+    .sort((a, b) => b.pW - a.pW);
+
+  for (const { id } of amarillos) {
+    if (count(winner) >= count(loser)) break;
+    stanceMap.set(id, winner);
+  }
+
+  // Paso 2: solo si los amarillos no alcanzaron — senadores del perdedor con |Δ| más cercano a 0
+  if (count(winner) < count(loser)) {
+    const loserSens = state.senators
+      .filter(s => stanceMap.get(s.id) === loser)
+      .map(s => ({ id: s.id, absD: Math.abs(deltaFor(s.id)) }))
+      .sort((a, b) => a.absD - b.absD);
+
+    for (const { id } of loserSens) {
+      if (count(winner) >= count(loser)) break;
+      stanceMap.set(id, winner);
     }
-    return { ...senator, stance: newStance };
-  });
+  }
+
+  state.senators = state.senators.map(s => ({ ...s, stance: stanceMap.get(s.id) }));
+  console.log(`[voting] corrección consistencia — ganador por score ponderado: ${winner} (${totalAzul.toFixed(2)} vs ${totalRojo.toFixed(2)})`);
 }
 
 // ─── Estado del debate ────────────────────────────────────────────────────────
 const initTeam = Math.random() < 0.5 ? 'rojo' : 'azul';
 const state = {
   paper:          '',
+  paperBase64:    null,
+  paperName:      '',
   entries:        [],   // { team, text, round, overtime, ts }
   round:          1,
   team:           initTeam,
@@ -195,6 +287,9 @@ const state = {
   roundFirstTeam: initTeam,
   senators:       buildInitialSenators(),
   lastScores:     null,
+  mode:           'final',
+  calculating:    false,
+  pendingVote:    false,   // ronda completada mientras se calculaba la anterior
 };
 
 // ─── Helpers WebSocket ────────────────────────────────────────────────────────
@@ -216,8 +311,10 @@ function snapshot() {
     round:          state.round,
     team:           state.team,
     roundFirstTeam: state.roundFirstTeam,
-    paperSet:       !!state.paper,
+    paperSet:       !!(state.paper || state.paperBase64),
+    paperName:      state.paperName,
     senators:       state.senators,
+    mode:           state.mode,
   };
 }
 
@@ -229,6 +326,60 @@ function advanceTurn(team) {
     state.team           = state.firstTeam;
     state.roundFirstTeam = state.firstTeam;
   }
+}
+
+// ─── Votación: función compartida ────────────────────────────────────────────
+function sendToControls(type, data) {
+  for (const [c, info] of clients.entries())
+    if (info.type === 'control') send(c, type, data);
+}
+
+function triggerVoting(ws) {
+  if (state.calculating) {
+    send(ws, 'vote_error', { msg: 'Ya hay una votación en curso.' });
+    return;
+  }
+  state.calculating = true;
+  sendToControls('vote_loading', {});
+  console.log('[gemini] llamando API…');
+
+  callGemini(state.paper, state.entries, state.paperBase64)
+    .then(scores => {
+      const overtimeTeams = new Set(state.entries.filter(e => e.overtime).map(e => e.team));
+      for (const team of overtimeTeams) {
+        scores[team].score_retorica = Math.max(0, scores[team].score_retorica - 0.1);
+        console.log(`[gemini] penalización overtime → ${team}`);
+      }
+
+      const before = new Map(state.senators.map(s => [s.id, s.stance]));
+      runVoting(scores);
+      applyConsistencyCorrection(scores);
+      const changes = state.senators
+        .filter(s => s.stance !== before.get(s.id))
+        .map(s => ({ id: s.id, from: before.get(s.id), to: s.stance }));
+
+      state.lastScores  = scores;
+      state.calculating = false;
+      broadcast('vote_animation', { changes, final: state.senators, mode: state.mode });
+      sendToControls('vote_result', { scores });
+      console.log(`[gemini] ${changes.length} senadores cambiaron | scores:`, JSON.stringify(scores));
+
+      if (state.pendingVote && state.mode === 'por_ronda' && (state.paper || state.paperBase64)) {
+        state.pendingVote = false;
+        console.log('[gemini] ejecutando votación pendiente de ronda anterior');
+        triggerVoting(ws);
+      }
+    })
+    .catch(err => {
+      state.calculating = false;
+      console.error('[gemini] error:', err.message);
+      sendToControls('vote_error', { msg: err.message });
+
+      if (state.pendingVote && state.mode === 'por_ronda' && (state.paper || state.paperBase64)) {
+        state.pendingVote = false;
+        triggerVoting(ws);
+      }
+    });
 }
 
 // ─── Servidor WebSocket ───────────────────────────────────────────────────────
@@ -253,9 +404,16 @@ wss.on('connection', (ws) => {
         break;
 
       case 'set_paper':
-        state.paper = (data.text || '').trim();
+        state.paper       = (data.text || '').trim();
+        state.paperBase64 = null;
+        state.paperName   = '';
         send(ws, 'paper_ack', { chars: state.paper.length });
         console.log(`[ws] paper guardado: ${state.paper.length} chars`);
+        break;
+
+      case 'set_mode':
+        state.mode = data.mode === 'por_ronda' ? 'por_ronda' : 'final';
+        console.log(`[ws] modo: ${state.mode}`);
         break;
 
       case 'add_argument': {
@@ -264,9 +422,22 @@ wss.on('connection', (ws) => {
         const team  = data.team || state.team;
         const entry = { team, text, overtime: !!data.overtime, round: state.round, ts: Date.now() };
         state.entries.push(entry);
+        const prevRound = state.round;
         advanceTurn(team);
         broadcast('state_update', snapshot());
         console.log(`[ws] argumento — ${team}, ronda ${entry.round}`);
+        if (state.mode === 'por_ronda' && state.round > prevRound) {
+          if (!state.paper && !state.paperBase64) {
+            sendToControls('vote_error', { msg: 'Ronda completada pero no hay paper/PDF cargado. Cargá el contexto antes de empezar.' });
+            console.log(`[ws] ronda ${prevRound} completa — sin paper, no se calcula`);
+          } else if (state.calculating) {
+            state.pendingVote = true;
+            console.log(`[ws] ronda ${prevRound} completa (en cola — Gemini ocupado)`);
+          } else {
+            console.log(`[ws] ronda ${prevRound} completa — votación automática`);
+            triggerVoting(ws);
+          }
+        }
         break;
       }
 
@@ -315,13 +486,18 @@ wss.on('connection', (ws) => {
         state.firstTeam      = newTeam;
         state.roundFirstTeam = newTeam;
         state.senators       = buildInitialSenators();
+        state.calculating    = false;
+        state.paper          = '';
+        state.paperBase64    = null;
+        state.paperName      = '';
+        state.pendingVote    = false;
         broadcast('state_update', snapshot());
         console.log('[ws] sesión reiniciada');
         break;
       }
 
       case 'calculate_votes': {
-        if (!state.paper) {
+        if (!state.paper && !state.paperBase64) {
           send(ws, 'vote_error', { msg: 'No hay paper/blog cargado.' });
           break;
         }
@@ -329,36 +505,7 @@ wss.on('connection', (ws) => {
           send(ws, 'vote_error', { msg: 'No hay argumentos en el debate todavía.' });
           break;
         }
-
-        send(ws, 'vote_loading', {});
-        console.log('[gemini] llamando API…');
-
-        callGemini(state.paper, state.entries)
-          .then(scores => {
-            // Penalización por overtime: -0.1 en retórica
-            const overtimeTeams = new Set(
-              state.entries.filter(e => e.overtime).map(e => e.team)
-            );
-            for (const team of overtimeTeams) {
-              scores[team].score_retorica = Math.max(0, scores[team].score_retorica - 0.1);
-              console.log(`[gemini] penalización overtime → ${team}`);
-            }
-
-            const before = new Map(state.senators.map(s => [s.id, s.stance]));
-            runVoting(scores);
-            const changes = state.senators
-              .filter(s => s.stance !== before.get(s.id))
-              .map(s => ({ id: s.id, from: before.get(s.id), to: s.stance }));
-
-            state.lastScores = scores;
-            broadcast('vote_animation', { changes, final: state.senators });
-            send(ws, 'vote_result', { scores });
-            console.log(`[gemini] ${changes.length} senadores cambiaron | scores:`, JSON.stringify(scores));
-          })
-          .catch(err => {
-            console.error('[gemini] error:', err.message);
-            send(ws, 'vote_error', { msg: err.message });
-          });
+        triggerVoting(ws);
         break;
       }
     }
@@ -376,6 +523,21 @@ const noCache = (_, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 };
+
+app.post('/upload-paper',
+  express.raw({ type: 'application/pdf', limit: '20mb' }),
+  (req, res) => {
+    if (!req.body || !req.body.length) {
+      return res.status(400).json({ error: 'No se recibió ningún PDF' });
+    }
+    state.paper       = '';
+    state.paperBase64 = req.body.toString('base64');
+    state.paperName   = req.headers['x-filename'] || 'documento.pdf';
+    const kb = Math.round(req.body.length / 1024);
+    console.log(`[paper] PDF cargado: ${state.paperName}, ${kb} KB`);
+    res.json({ ok: true, kb, name: state.paperName });
+  }
+);
 
 app.get('/control', noCache, (_, res) =>
   res.sendFile(path.join(__dirname, 'public', 'control.html')));

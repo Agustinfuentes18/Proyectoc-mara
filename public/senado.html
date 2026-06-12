@@ -337,7 +337,7 @@ async function applyWave(svg, changes, stagger = 28) {
   updateCounts();
 }
 
-async function animateVote({ changes, final }) {
+async function animateVote({ changes, final, mode }) {
   if (animating) return;
   animating = true;
 
@@ -387,9 +387,14 @@ async function animateVote({ changes, final }) {
   document.getElementById('voteOverlay').classList.add('show');
 
   await wait(800);
-  document.getElementById('overlayHint').style.display = 'block';
-  overlayCanClose = true;
-  animating = false;
+  if (mode === 'por_ronda') {
+    await wait(3000);
+    hideOverlay();
+  } else {
+    document.getElementById('overlayHint').style.display = 'block';
+    overlayCanClose = true;
+    animating = false;
+  }
 }
 
 // ── WebSocket ────────────────────────────────────────────────────
